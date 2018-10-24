@@ -1,0 +1,267 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters: 
+  InstanceTypeParameter: 
+    Type: String
+    Default: t2.micro
+    AllowedValues: 
+      - t2.micro
+      - m1.small
+      - m1.large
+    Description: Enter t2.micro, m1.small, or m1.large. Default is t2.micro.
+  InstanceImageIdParameter:
+    Type: AWS::EC2::Image::Id
+  InstanceKeyPairKeyNameParameter:
+    Type: AWS::EC2::KeyPair::KeyName
+Resources:
+  VPCFASR222:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: VPCFAS-R222
+  SubPUBapsoutheast2aR222:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: ap-southeast-2a
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: SubPUB-ap-southeast-2a-R222
+      VpcId:
+        Ref: VPCFASR222
+    DependsOn: VPCFASR222
+  SubPRVT1apsoutheast2cR222:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: ap-southeast-2c
+      CidrBlock: 10.0.2.0/24
+      Tags:
+        - Key: Name
+          Value: SubPRVT1ap-southeast-2c-R222
+      VpcId:
+        Ref: VPCFASR222
+    DependsOn: VPCFASR222
+  SubPRVT2apsoutheast2bR222:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: ap-southeast-2b
+      CidrBlock: 10.0.3.0/24
+      Tags:
+        - Key: Name
+          Value: SubPRVT2ap-southeast-2b-R222
+      VpcId:
+        Ref: VPCFASR222
+    DependsOn: VPCFASR222
+  SubGrpFASR222:
+    Type: 'AWS::RDS::DBSubnetGroup'
+    Properties:
+      DBSubnetGroupName: SubGrpRDSFasR222
+      DBSubnetGroupDescription: SubGrpRDSFasR222
+      SubnetIds:
+        - !Ref SubPRVT1apsoutheast2cR222
+        - !Ref SubPRVT2apsoutheast2bR222
+  IGTWYR222:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties:
+      Tags:
+        - Key: Name
+          Value: IGTWY-R222
+    DependsOn: VPCFASR222
+  AttachGatewayR222:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId:
+        Ref: VPCFASR222
+      InternetGatewayId:
+        Ref: IGTWYR222
+    DependsOn: IGTWYR222
+  RT1PublicR222:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId:
+        Ref: VPCFASR222
+      Tags:
+        - Key: Name
+          Value: RT1Public-R222
+    DependsOn: VPCFASR222
+  RTRoutOutR222:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      RouteTableId:
+        Ref: RT1PublicR222
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: IGTWYR222
+    DependsOn: 
+        -   RT1PublicR222
+        -   AttachGatewayR222
+  SubnetToPublicRouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId:
+        Ref: SubPUBapsoutheast2aR222
+      RouteTableId:
+        Ref: RT1PublicR222
+  PublicSecurityGroup1: 
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupDescription: "For Public Instances"
+      VpcId: 
+        Ref: VPCFASR222
+      SecurityGroupIngress:
+        -
+            IpProtocol: "tcp"
+            FromPort: 22
+            ToPort: 22
+            CidrIp: "0.0.0.0/0"
+        - 
+            IpProtocol: "tcp"
+            FromPort: 80
+            ToPort: 80
+            CidrIp: "0.0.0.0/0"
+        - 
+            IpProtocol: "tcp"
+            FromPort: 443
+            ToPort: 443
+            CidrIp: "0.0.0.0/0"
+    DependsOn: VPCFASR222
+  PrivateSecurityGroup1: 
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupDescription: "For RDS DB Instance"
+      VpcId: 
+        Ref: VPCFASR222
+      SecurityGroupIngress:
+        -
+            IpProtocol: "tcp"
+            FromPort: 3306
+            ToPort: 3306
+            CidrIp: "10.0.1.0/24"
+    DependsOn: VPCFASR222
+  DbSecuritySecurityGroup1: 
+    Type: AWS::RDS::DBSecurityGroup
+    Properties:
+      GroupDescription: "RDS DB security group"
+      EC2VpcId:
+        Ref: VPCFASR222
+      DBSecurityGroupIngress: 
+        -   EC2SecurityGroupId: 
+                Ref:    PrivateSecurityGroup1
+        -   CIDRIP: "10.0.1.0/24"
+    DependsOn: PrivateSecurityGroup1
+  ElasticLoadBalancer:
+    Type: AWS::ElasticLoadBalancing::LoadBalancer
+    Properties:
+        Subnets:
+            - Ref: SubPUBapsoutheast2aR222
+        SecurityGroups:
+            - Ref: PublicSecurityGroup1
+        Listeners:
+        - LoadBalancerPort: '80'
+          InstancePort: '80'
+          Protocol: HTTP
+        HealthCheck:
+          Target: HTTP:80/healthcheck.html
+          HealthyThreshold: '3'
+          UnhealthyThreshold: '5'
+          Interval: '30'
+          Timeout: '3'
+    DependsOn:
+        -   SubPUBapsoutheast2aR222
+        -   PublicSecurityGroup1
+  RDSFASR222:
+    Type: 'AWS::RDS::DBInstance'
+    Properties:
+      DBName: RDSMySQLR222
+      AllocatedStorage: 20
+      DBInstanceClass: db.t2.micro
+      Engine: MySQL
+      EngineVersion: 5.7.23
+      MasterUsername: dbuser
+      MasterUserPassword: dbpassword
+      DBSubnetGroupName:
+        Ref: SubGrpFASR222
+      DBSecurityGroups:
+        -   Ref: DbSecuritySecurityGroup1
+      Tags:
+        - Key: Name
+          Value: RDS-R222
+    DeletionPolicy: Delete
+    DependsOn:
+        -   SubGrpFASR222
+        -   DbSecuritySecurityGroup1
+  WebServerLaunchConfig: 
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties: 
+        KeyName:
+            Ref: InstanceKeyPairKeyNameParameter
+        ImageId: 
+            Ref: InstanceImageIdParameter
+        SecurityGroups: 
+          -   Ref: PublicSecurityGroup1
+        InstanceType:
+            Ref: InstanceTypeParameter
+        UserData:
+            Fn::Base64:
+              !Sub 
+                - |
+                  #!/bin/bash
+                  yum install httpd php php-mysql mysql git -y
+                  yum update -y
+                  service httpd start
+                  chkconfig httpd on
+                  cd /var/www/html
+                  echo "<?php phpinfo(); ?>" index.php
+                  git clone "https://github.com/rashidhussain85/AppUsingPHP.git"
+                  cp AppUsingPHP/* ../html
+                  mysql -u dbuser --password="dbpassword" -h ${RDSEndpointAddress} <<SETUP_DATABASE_QUERY
+                  CREATE DATABASE IF NOT EXISTS db;
+                  USE db;
+                  DROP TABLE IF EXISTS tbllogin;
+                  CREATE TABLE tbllogin (
+                      id int(10) unsigned NOT NULL AUTO_INCREMENT,
+                      username varchar(45) NOT NULL,
+                      psd varchar(45) NOT NULL,
+                      PRIMARY KEY (id)
+                  ) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=latin1;
+                  INSERT INTO tbllogin (id,username,psd) VALUES 
+                  (1,'arun','upadhyay'),
+                  (2,'gm college','gm college');
+                  SETUP_DATABASE_QUERY
+                  cat > /etc/environment << ENVRMN_VARIABLES
+                  export RDSInstanceEndpoint=${RDSEndpointAddress}
+                  export MYNAME=RashidName
+                  ENVRMN_VARIABLES
+                - {
+                  RDSEndpointAddress: !GetAtt RDSFASR222.Endpoint.Address
+                  }
+    DependsOn:  PublicSecurityGroup1
+  WebServerAutoScalingGroup: 
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties: 
+      VPCZoneIdentifier:
+        -   Ref: SubPUBapsoutheast2aR222
+      LaunchConfigurationName: 
+        Ref: WebServerLaunchConfig
+      MinSize: "2"
+      MaxSize: "2"
+      LoadBalancerNames: 
+        - Ref: ElasticLoadBalancer
+      Tags:
+        - Key: Name
+          Value: WebServerASG-R222
+          PropagateAtLaunch: 'true'
+    DependsOn:
+        -   WebServerLaunchConfig
+        -   SubPUBapsoutheast2aR222
+        -   ElasticLoadBalancer
+Outputs:
+  RDSInstanceId:
+    Description: InstanceId of the newly created RDS Instance
+    Value: !Ref RDSFASR222
+  RDSInstanceIdEndPoint:
+    Description: Endpoint Address of the newly created RDS Instance
+    Value: !GetAtt RDSFASR222.Endpoint.Address
